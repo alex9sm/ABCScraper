@@ -71,6 +71,7 @@ func ScrapeUserStore(zipcode string) ([]StoreResult, error) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath("/usr/bin/google-chrome-stable"),
 		chromedp.Flag("headless", false),
+		chromedp.Flag("user-data-dir", "/home/apiuser/.config/google-chrome/scraper-profile"),
 
 		// Remove automation detection
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
