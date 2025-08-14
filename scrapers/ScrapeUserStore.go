@@ -120,10 +120,53 @@ func ScrapeUserStore(zipcode string) ([]StoreResult, error) {
 	defer cancel()
 
 	var results []StoreResult
-	targetURL := "https://www.abc.virginia.gov/stores"
 
 	err := chromedp.Run(ctx,
-		chromedp.Navigate(targetURL),
+		// Navigate to Google first to bypass Cloudflare
+		chromedp.Navigate("https://www.google.com"),
+
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			time.Sleep(1 * time.Second)
+			return nil
+		}),
+
+		// Search for "abcvirginia stores" on Google
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return chromedp.Run(ctx,
+				chromedp.WaitVisible(`input[name="q"]`, chromedp.ByQuery),
+				chromedp.Clear(`input[name="q"]`, chromedp.ByQuery),
+				chromedp.SendKeys(`input[name="q"]`, "abcvirginia stores", chromedp.ByQuery),
+				chromedp.Submit(`input[name="q"]`, chromedp.ByQuery),
+			)
+		}),
+
+		// Wait for search results and click on ABC Virginia stores link
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			time.Sleep(2 * time.Second)
+
+			// Try to find and click the ABC Virginia stores link
+			linkSelectors := []string{
+				`a[href*="https://www.abc.virginia.gov/stores"]`,
+				`a[href*="abc.virginia.gov/stores"]`,
+				`a[href*="www.abc.virginia.gov/stores"]`,
+				`a:contains("Store Locator")`,
+				`a:contains("ABC Virginia")`,
+			}
+
+			for _, selector := range linkSelectors {
+				err := chromedp.Click(selector, chromedp.ByQuery).Do(ctx)
+				if err == nil {
+					break
+				}
+			}
+
+			return nil
+		}),
+
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			time.Sleep(2 * time.Second)
+			return nil
+		}),
 
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			maxWaits := 20
