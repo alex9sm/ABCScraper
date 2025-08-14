@@ -62,23 +62,53 @@ func cleanHours(rawHours string) string {
 }
 
 func ScrapeUserStore(zipcode string) ([]StoreResult, error) {
-	// Use persistent Xvfb service instead of managing our own
-	if os.Getenv("DISPLAY") == "" {
-		os.Setenv("DISPLAY", ":1")
-	}
+
+	os.Setenv("DISPLAY", ":1")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath("/usr/bin/google-chrome-stable"),
-		chromedp.Flag("headless", false), // Keep non-headless as required
+		chromedp.Flag("headless", false),
+
+		// Remove automation detection
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.Flag("exclude-switches", "enable-automation"),
+		chromedp.Flag("disable-web-security", false), // Changed to false
+		chromedp.Flag("disable-features", "VizDisplayCompositor"),
 		chromedp.Flag("disable-extensions", false),
-		chromedp.Flag("no-sandbox", true),            // Important for VPS environments
-		chromedp.Flag("disable-dev-shm-usage", true), // Prevents /dev/shm issues
-		chromedp.Flag("disable-gpu", false),          // Keep GPU enabled for non-headless
+		chromedp.Flag("disable-plugins", false),
+		chromedp.Flag("disable-ipc-flooding-protection", true),
+
+		// Make it look more residential
+		chromedp.Flag("no-default-browser-check", true),
+		chromedp.Flag("no-first-run", true),
+		chromedp.Flag("disable-default-apps", true),
+		chromedp.Flag("disable-component-update", true),
+		chromedp.Flag("disable-sync", true),
+		chromedp.Flag("disable-translate", true),
+		chromedp.Flag("disable-background-timer-throttling", false),
+		chromedp.Flag("disable-renderer-backgrounding", false),
+		chromedp.Flag("disable-backgrounding-occluded-windows", false),
+
+		// Viewport and system flags
+		chromedp.Flag("window-size", "1920,1080"),
+		chromedp.Flag("window-position", "0,0"),
+		chromedp.Flag("start-maximized", false),
+
+		// VPS-specific flags
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("disable-gpu", false),
+
+		// Additional stealth flags
+		chromedp.Flag("disable-logging", true),
+		chromedp.Flag("disable-in-process-stack-traces", true),
+		chromedp.Flag("silent", true),
+		chromedp.Flag("log-level", "3"),
+
+		// Enhanced user agent
 		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
 	)
 
