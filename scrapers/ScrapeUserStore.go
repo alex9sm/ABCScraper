@@ -64,13 +64,14 @@ func cleanHours(rawHours string) string {
 func ScrapeUserStore(zipcode string) ([]StoreResult, error) {
 	// Use persistent Xvfb service instead of managing our own
 	if os.Getenv("DISPLAY") == "" {
-		os.Setenv("DISPLAY", ":99")
+		os.Setenv("DISPLAY", ":1")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath("/usr/bin/google-chrome-stable"),
 		chromedp.Flag("headless", false), // Keep non-headless as required
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.Flag("exclude-switches", "enable-automation"),
