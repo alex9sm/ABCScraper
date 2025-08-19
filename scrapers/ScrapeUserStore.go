@@ -11,13 +11,13 @@ import (
 
 // StoreResult represents the structure of store data returned from the API
 type StoreResult struct {
-	ID        string  `json:"id"`
+	Title     string  `json:"title"`
 	Address   string  `json:"address"`
 	ZipCode   string  `json:"zip_code"`
-	Phone     string  `json:"phone"`
 	Latitude  float64 `json:"latitude"`
 	Longitude float64 `json:"longitude"`
 	Hours     string  `json:"hours"`
+	Distance  int16   `json:"distance"`
 }
 
 // NominatimResponse represents the response from Nominatim API
@@ -129,22 +129,40 @@ func ScrapeUserStore(zipcode string) ([]StoreResult, error) {
 		return nil, fmt.Errorf("API request failed with status code: %d, response: %s", resp.StatusCode(), resp.String())
 	}
 
-	// TODO: PARSE THE API RESPONSE HERE
-	// The structure below assumes the API returns an array of store objects
-	// Modify this based on your actual API response structure
-
+	// Parse the API response based on the actual structure from example.json
 	var apiResponse struct {
-		Stores []StoreResult `json:"stores"`
-		// Or if the API returns the stores directly in an array:
-		// Stores []StoreResult `json:"data"`
+		Results []struct {
+			Title string `json:"title"`
+			Raw   struct {
+				NavigationTitle string  `json:"navigationz32xtitle"`
+				Address1        string  `json:"address1"`
+				ZipCode         string  `json:"z122xipcode"`
+				Latitude        float64 `json:"latitude"`
+				Longitude       float64 `json:"longitude"`
+				Hours           string  `json:"hours"`
+				Distance        float64 `json:"distance"`
+			} `json:"raw"`
+		} `json:"results"`
 	}
-
-	// Alternative: if the API returns stores directly as an array
-	// var stores []StoreResult
 
 	if err := json.Unmarshal(resp.Body(), &apiResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse API response: %w", err)
 	}
 
-	return apiResponse.Stores, nil
+	// Convert API results to StoreResult structs
+	var stores []StoreResult
+	for _, result := range apiResponse.Results {
+		store := StoreResult{
+			Title:     result.Title,
+			Address:   result.Raw.Address1,
+			ZipCode:   result.Raw.ZipCode,
+			Latitude:  result.Raw.Latitude,
+			Longitude: result.Raw.Longitude,
+			Hours:     result.Raw.Hours,
+			Distance:  int16(result.Raw.Distance),
+		}
+		stores = append(stores, store)
+	}
+
+	return stores, nil
 }
