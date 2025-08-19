@@ -1,455 +1,150 @@
 package scrapers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"log"
-	"os"
-	"regexp"
-	"strings"
+	"strconv"
 	"time"
 
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/chromedp"
+	"github.com/go-resty/resty/v2"
 )
 
+// StoreResult represents the structure of store data returned from the API
 type StoreResult struct {
-	StoreNumber    string `json:"storeNumber"`
-	GoogleMapsLink string `json:"googleMapsLink"`
-	Address        string `json:"address"`
-	Phone          string `json:"phone"`
-	Hours          string `json:"hours"`
+	ID        string  `json:"id"`
+	Address   string  `json:"address"`
+	ZipCode   string  `json:"zip_code"`
+	Phone     string  `json:"phone"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+	Hours     string  `json:"hours"`
 }
 
-func cleanAddress(rawAddress string) string {
-	address := strings.TrimSpace(rawAddress)
-
-	// Remove phone numbers
-	phoneRegex := regexp.MustCompile(`\d{3}-\d{3}-\d{4}`)
-	address = phoneRegex.ReplaceAllString(address, "")
-
-	// Remove distance (e.g., "1.2 Miles")
-	distanceRegex := regexp.MustCompile(`\d+\.?\d*\s+Miles?`)
-	address = distanceRegex.ReplaceAllString(address, "")
-
-	// Remove hours info
-	hoursRegex := regexp.MustCompile(`Hours\s+.*`)
-	address = hoursRegex.ReplaceAllString(address, "")
-
-	// Remove "Visit Store Page", "Make My Store", etc.
-	extraTextRegex := regexp.MustCompile(`(?i)(Visit Store Page|Make My Store|My Store).*`)
-	address = extraTextRegex.ReplaceAllString(address, "")
-
-	// Clean up multiple spaces
-	spaceRegex := regexp.MustCompile(`\s+`)
-	address = spaceRegex.ReplaceAllString(address, " ")
-
-	return strings.TrimSpace(address)
+// NominatimResponse represents the response from Nominatim API
+type NominatimResponse struct {
+	Lat string `json:"lat"`
+	Lon string `json:"lon"`
 }
 
-func cleanHours(rawHours string) string {
-	hours := strings.TrimSpace(rawHours)
+// getCoordinatesFromZipcode uses Nominatim API to get lat/lng from zipcode
+func getCoordinatesFromZipcode(zipcode string) (float64, float64, error) {
+	client := resty.New()
+	client.SetTimeout(10 * time.Second)
 
-	// Remove "Hours" prefix
-	hours = regexp.MustCompile(`^Hours\s*`).ReplaceAllString(hours, "")
+	url := fmt.Sprintf("https://nominatim.openstreetmap.org/search?q=%s,USA&format=json&limit=1", zipcode)
 
-	// Clean up multiple spaces
-	spaceRegex := regexp.MustCompile(`\s+`)
-	hours = spaceRegex.ReplaceAllString(hours, " ")
-
-	return strings.TrimSpace(hours)
-}
-
-func ScrapeUserStore(zipcode string) ([]StoreResult, error) {
-
-	os.Setenv("DISPLAY", ":1")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.ExecPath("/usr/bin/google-chrome-stable"),
-		chromedp.Flag("headless", false),
-		chromedp.Flag("user-data-dir", "/home/apiuser/.config/google-chrome/scraper-profile"),
-
-		// Remove automation detection
-		chromedp.Flag("disable-blink-features", "AutomationControlled"),
-		chromedp.Flag("exclude-switches", "enable-automation"),
-		chromedp.Flag("disable-web-security", false), // Changed to false
-		chromedp.Flag("disable-features", "VizDisplayCompositor"),
-		chromedp.Flag("disable-extensions", false),
-		chromedp.Flag("disable-plugins", false),
-		chromedp.Flag("disable-ipc-flooding-protection", true),
-
-		// Make it look more residential
-		chromedp.Flag("no-default-browser-check", true),
-		chromedp.Flag("no-first-run", true),
-		chromedp.Flag("disable-default-apps", true),
-		chromedp.Flag("disable-component-update", true),
-		chromedp.Flag("disable-sync", true),
-		chromedp.Flag("disable-translate", true),
-		chromedp.Flag("disable-background-timer-throttling", false),
-		chromedp.Flag("disable-renderer-backgrounding", false),
-		chromedp.Flag("disable-backgrounding-occluded-windows", false),
-
-		// Viewport and system flags
-		chromedp.Flag("window-size", "1920,1080"),
-		chromedp.Flag("window-position", "0,0"),
-		chromedp.Flag("start-maximized", false),
-
-		// VPS-specific flags
-		chromedp.Flag("no-sandbox", true),
-		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.Flag("disable-gpu", false),
-
-		// Additional stealth flags
-		chromedp.Flag("disable-logging", true),
-		chromedp.Flag("disable-in-process-stack-traces", true),
-		chromedp.Flag("silent", true),
-		chromedp.Flag("log-level", "3"),
-
-		// Enhanced user agent
-		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
-	)
-
-	allocCtx, cancel := chromedp.NewExecAllocator(ctx, opts...)
-	defer cancel()
-
-	ctx, cancel = chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
-	defer cancel()
-
-	var results []StoreResult
-
-	err := chromedp.Run(ctx,
-		// Navigate to Google first to bypass Cloudflare
-		chromedp.Navigate("https://www.google.com"),
-
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			time.Sleep(1 * time.Second)
-			return nil
-		}),
-
-		// Search for "abcvirginia stores" on Google
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			return chromedp.Run(ctx,
-				chromedp.WaitVisible(`input[name="q"]`, chromedp.ByQuery),
-				chromedp.Clear(`input[name="q"]`, chromedp.ByQuery),
-				chromedp.SendKeys(`input[name="q"]`, "abcvirginia stores", chromedp.ByQuery),
-				chromedp.Submit(`input[name="q"]`, chromedp.ByQuery),
-			)
-		}),
-
-		// Wait for search results and click on ABC Virginia stores link
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			time.Sleep(2 * time.Second)
-
-			// Try to find and click the ABC Virginia stores link
-			linkSelectors := []string{
-				`a[href*="https://www.abc.virginia.gov/stores"]`,
-				`a[href*="abc.virginia.gov/stores"]`,
-				`a[href*="www.abc.virginia.gov/stores"]`,
-				`a:contains("Store Locator")`,
-				`a:contains("ABC Virginia")`,
-			}
-
-			for _, selector := range linkSelectors {
-				err := chromedp.Click(selector, chromedp.ByQuery).Do(ctx)
-				if err == nil {
-					break
-				}
-			}
-
-			return nil
-		}),
-
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			time.Sleep(2 * time.Second)
-			return nil
-		}),
-
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			maxWaits := 20
-			for i := 0; i < maxWaits; i++ {
-				var currentTitle string
-				chromedp.Title(&currentTitle).Do(ctx)
-				if currentTitle != "Just a moment..." && currentTitle != "" {
-					break
-				}
-				time.Sleep(3 * time.Second)
-			}
-			return nil
-		}),
-
-		// Wait for search box to appear and perform search
-		chromedp.ActionFunc(func(ctx context.Context) error {
-
-			maxWaits := 15
-			for i := 0; i < maxWaits; i++ {
-				var searchNodes []*cdp.Node
-
-				// Try multiple XPath selectors for the search box
-				xpaths := []string{
-					`//*[@id="StoresSearchBox"]/div[4]/div[1]/input`,
-					`/html/body/div[4]/div/div/div[1]/div[2]/div[1]/div[3]/div[3]/div[2]/div[1]/div/div[4]/div[1]/input`,
-					`//div[contains(@class, "CoveoOmnibox")]//input[@role="combobox"]`,
-					`//div[contains(@class, "magic-box-input")]//input[@role="combobox"]`,
-					`//input[@placeholder="Search by City, Zip, or Store #"]`,
-				}
-
-				found := false
-				for _, xpath := range xpaths {
-					err := chromedp.Nodes(xpath, &searchNodes, chromedp.BySearch).Do(ctx)
-					if err == nil && len(searchNodes) > 0 {
-						found = true
-						break
-					}
-				}
-
-				if found {
-					break
-				}
-
-				fmt.Printf("Search box not found (attempt %d/%d)\n", i+1, maxWaits)
-				time.Sleep(2 * time.Second)
-			}
-
-			return nil
-		}),
-
-		// Perform the search
-		chromedp.ActionFunc(func(ctx context.Context) error {
-
-			// Try different search strategies using XPath
-			searchStrategies := []func(context.Context) error{
-				// Strategy 1: Specific XPath with ID - click, type, enter
-				func(ctx context.Context) error {
-					return chromedp.Run(ctx,
-						chromedp.WaitVisible(`//*[@id="StoresSearchBox"]/div[4]/div[1]/input`, chromedp.BySearch),
-						chromedp.Click(`//*[@id="StoresSearchBox"]/div[4]/div[1]/input`, chromedp.BySearch),
-						chromedp.Clear(`//*[@id="StoresSearchBox"]/div[4]/div[1]/input`, chromedp.BySearch),
-						chromedp.SendKeys(`//*[@id="StoresSearchBox"]/div[4]/div[1]/input`, zipcode, chromedp.BySearch),
-						chromedp.SendKeys(`//*[@id="StoresSearchBox"]/div[4]/div[1]/input`, "\n", chromedp.BySearch),
-					)
-				},
-			}
-
-			var lastErr error
-			for i, strategy := range searchStrategies {
-				err := strategy(ctx)
-				lastErr = err
-				fmt.Printf("Search strategy %d failed: %v\n", i+1, err)
-			}
-
-			return lastErr
-		}),
-
-		// Wait for search results to load after pressing enter
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			time.Sleep(500 * time.Millisecond) // Half second after pressing enter
-			return nil
-		}),
-
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			maxWaits := 20
-			for i := 0; i < maxWaits; i++ {
-				var storeNodes []*cdp.Node
-				err := chromedp.Nodes(".CoveoResult", &storeNodes, chromedp.ByQueryAll).Do(ctx)
-
-				if err == nil && len(storeNodes) > 0 {
-					break
-				}
-
-				err = chromedp.Nodes("[class*='store']", &storeNodes, chromedp.ByQueryAll).Do(ctx)
-				if err == nil && len(storeNodes) > 0 {
-					fmt.Printf("Found %d store elements!\n", len(storeNodes))
-					break
-				}
-
-				fmt.Printf("Waiting for store results... (attempt %d/%d)\n", i+1, maxWaits)
-				time.Sleep(2 * time.Second)
-			}
-			return nil
-		}),
-
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			approaches := []struct {
-				name   string
-				script string
-			}{
-				{
-					"Store data extraction",
-					`
-					(function() {
-						const stores = [];
-						const storeElements = document.querySelectorAll('.CoveoResult, [class*="store-result"], [class*="store-info"]');
-						
-						storeElements.forEach(element => {
-							let storeNumber = '';
-							let address = '';
-							let phone = '';
-							let hours = '';
-							let googleMapsLink = '';
-							
-							// Try to find store number
-							const storeNumEl = element.querySelector('[class*="store-number"], .store-id, h3, h4');
-							if (storeNumEl) {
-								const text = storeNumEl.textContent.trim();
-								const match = text.match(/(\d+)/);
-								if (match) storeNumber = match[1];
-							}
-							
-							// Try to find address and parse it properly
-							const addressEl = element.querySelector('[class*="address"], .location, [class*="location"]');
-							if (addressEl) {
-								let fullText = addressEl.textContent.trim().replace(/\s+/g, ' ');
-								
-								// Extract phone number
-								const phoneMatch = fullText.match(/(\d{3}-\d{3}-\d{4})/);
-								if (phoneMatch) {
-									phone = phoneMatch[1];
-									fullText = fullText.replace(phoneMatch[0], '').trim();
-								}
-								
-								// Extract address (everything before distance/miles)
-								const addressMatch = fullText.match(/^(.*?)(?:\s+\d+\.?\d*\s+Miles|$)/i);
-								if (addressMatch) {
-									address = addressMatch[1].trim();
-								} else {
-									// Fallback: take first part before common separators
-									const parts = fullText.split(/(?:Hours|Visit Store|Make My Store|\d+\.?\d*\s+Miles)/i);
-									address = parts[0].trim();
-								}
-								
-								// Clean up address further
-								address = address.replace(/\s+/g, ' ').trim();
-							}
-							
-							// Try to find hours
-							const hoursEl = element.querySelector('[class*="hours"], [class*="time"]');
-							if (hoursEl) {
-								hours = hoursEl.textContent.trim().replace(/\s+/g, ' ');
-								// Remove "Hours" prefix if present
-								hours = hours.replace(/^Hours\s*/i, '');
-							}
-							
-							// Try to find Google Maps link
-							const mapLink = element.querySelector('a[href*="google.com/maps"], a[href*="maps.google"]');
-							if (mapLink) {
-								googleMapsLink = mapLink.href;
-							}
-							
-							// Also check data attributes
-							if (element.hasAttribute('data-store-id')) {
-								storeNumber = element.getAttribute('data-store-id');
-							}
-							if (element.hasAttribute('data-address')) {
-								address = element.getAttribute('data-address');
-							}
-							if (element.hasAttribute('data-hours')) {
-								hours = element.getAttribute('data-hours');
-								hours = hours.replace(/^Hours\s*/i, '');
-							}
-							
-							if (storeNumber || address) {
-								stores.push({
-									storeNumber: storeNumber,
-									address: address,
-									phone: phone,
-									hours: hours,
-									googleMapsLink: googleMapsLink
-								});
-							}
-						});
-						
-						return stores;
-					})()
-					`,
-				},
-				{
-					"Fallback extraction",
-					`
-					(function() {
-						const stores = [];
-						const allElements = document.querySelectorAll('*');
-						
-						allElements.forEach(element => {
-							const text = element.textContent;
-							if (text && text.includes('Store') && text.match(/\d{3,}/)) {
-								const storeMatch = text.match(/Store\s*#?\s*(\d+)/i);
-								if (storeMatch) {
-									stores.push({
-										storeNumber: storeMatch[1],
-										address: text.slice(0, 200),
-										hours: '',
-										googleMapsLink: ''
-									});
-								}
-							}
-						});
-						
-						return stores.slice(0, 10);
-					})()
-					`,
-				},
-			}
-
-			seenStores := make(map[string]bool)
-
-			for _, approach := range approaches {
-				var storeData []map[string]interface{}
-				err := chromedp.Evaluate(approach.script, &storeData).Do(ctx)
-				if err == nil && len(storeData) > 0 {
-					fmt.Printf("%s: Found %d stores\n", approach.name, len(storeData))
-
-					for _, store := range storeData {
-						result := StoreResult{}
-
-						if val, ok := store["storeNumber"].(string); ok {
-							result.StoreNumber = strings.TrimSpace(val)
-						}
-						if val, ok := store["address"].(string); ok {
-							result.Address = cleanAddress(val)
-						}
-						if val, ok := store["phone"].(string); ok {
-							result.Phone = strings.TrimSpace(val)
-						}
-						if val, ok := store["hours"].(string); ok {
-							result.Hours = cleanHours(val)
-						}
-						if val, ok := store["googleMapsLink"].(string); ok {
-							result.GoogleMapsLink = strings.TrimSpace(val)
-						}
-
-						// Create unique key for deduplication
-						uniqueKey := result.StoreNumber + "|" + result.Address
-
-						if (result.StoreNumber != "" || result.Address != "") && !seenStores[uniqueKey] {
-							seenStores[uniqueKey] = true
-							results = append(results, result)
-						}
-					}
-					break
-				} else {
-					fmt.Printf("%s: No results\n", approach.name)
-				}
-			}
-
-			return nil
-		}),
-	)
+	resp, err := client.R().
+		SetHeader("User-Agent", "ABCScraper/1.0").
+		Get(url)
 
 	if err != nil {
-		return nil, fmt.Errorf("error running chromedp: %v", err)
+		return 0, 0, fmt.Errorf("failed to call Nominatim API: %w", err)
+	}
+
+	if resp.StatusCode() != 200 {
+		return 0, 0, fmt.Errorf("Nominatim API returned status %d", resp.StatusCode())
+	}
+
+	var results []NominatimResponse
+	if err := json.Unmarshal(resp.Body(), &results); err != nil {
+		return 0, 0, fmt.Errorf("failed to parse Nominatim response: %w", err)
 	}
 
 	if len(results) == 0 {
-		fmt.Println("No stores found")
-	} else {
-		fmt.Printf("Found %d stores\n", len(results))
-		jsonData, _ := json.MarshalIndent(results, "", "  ")
-		fmt.Printf("Store data:\n%s\n", string(jsonData))
+		return 0, 0, fmt.Errorf("no results found for zipcode %s", zipcode)
 	}
 
-	return results, nil
+	lat, err := strconv.ParseFloat(results[0].Lat, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse latitude: %w", err)
+	}
+
+	lng, err := strconv.ParseFloat(results[0].Lon, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse longitude: %w", err)
+	}
+
+	return lat, lng, nil
+}
+
+func ScrapeUserStore(zipcode string) ([]StoreResult, error) {
+	// Lookup latitude and longitude from zip code using Nominatim API
+	lat, lng, err := getCoordinatesFromZipcode(zipcode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get coordinates for zipcode %s: %w", zipcode, err)
+	}
+
+	// Create a new resty client
+	client := resty.New()
+
+	// Set timeout for the request
+	client.SetTimeout(30 * time.Second)
+
+	apiURL := "https://www.abc.virginia.gov/coveo/rest/search/v2?sitecoreItemUri=sitecore%3A%2F%2Fweb%2F%7B712668CA-41D0-461E-B27D-4D8E1D35FFD0%7D%3Flang%3Den%26amp%3Bver%3D7&siteName=website"
+
+	headers := map[string]string{
+		"Host":                       "www.abc.virginia.gov",
+		"Content-Length":             "2229",
+		"Sec-Ch-Ua-Platform":         "\"Windows\"",
+		"Authorization":              "Bearer eyJhbGciOiJIUzI1NiJ9.eyJ2OCI6dHJ1ZSwidG9rZW5JZCI6InJkemtiaWViZ3Ztam9xZDNpeXpsNnRzbTM0Iiwib3JnYW5pemF0aW9uIjoidmlyZ2luaWFhYmNwcm9kdWN0aW9uc2dsNzIwcDEiLCJ1c2VySWRzIjpbeyJ0eXBlIjoiVXNlciIsIm5hbWUiOiJhbm9ueW1vdXMiLCJwcm92aWRlciI6IkVtYWlsIFNlY3VyaXR5IFByb3ZpZGVyIn1dLCJyb2xlcyI6WyJxdWVyeUV4ZWN1dG9yIl0sImlzcyI6IlNlYXJjaEFwaSIsImV4cCI6MTc1NTYxODM3MiwiaWF0IjoxNzU1NTMxOTcyfQ.ypyDp8i3-mVW0Z_4mvdplj2EMJ2ggc2FUGCtIOFJxIg",
+		"Accept-Language":            "en-US,en;q=0.9",
+		"Sec-Ch-Ua":                  "\"Not A(Brand\";v=\"8\", \"Chromium\";v=\"132\"",
+		"Sec-Ch-Ua-Bitness":          "\"\"",
+		"Sec-Ch-Ua-Model":            "\"\"",
+		"Sec-Ch-Ua-Mobile":           "?0",
+		"Sec-Ch-Ua-Arch":             "\"\"",
+		"Sec-Ch-Ua-Full-Version":     "\"\"",
+		"User-Agent":                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+		"Content-Type":               "application/x-www-form-urlencoded; charset=UTF-8",
+		"Sec-Ch-Ua-Platform-Version": "\"\"",
+		"Accept":                     "*/*",
+		"Origin":                     "https://www.abc.virginia.gov",
+		"Sec-Fetch-Site":             "same-origin",
+		"Sec-Fetch-Mode":             "cors",
+		"Sec-Fetch-Dest":             "empty",
+		"Referer":                    "https://www.abc.virginia.gov/stores",
+		"Accept-Encoding":            "gzip, deflate, br",
+		"Priority":                   "u=1, i",
+		"Cookie":                     "__cf_bm=2.GK1syVD3_BofiYddVd39ahcWTsnHmbOREsSI9auJY-1755534212-1.0.1.1-aIIXJir8Ktdu9fsXFm0M_D3VbVR_e7PFe7.z3Gw2ywXSr4RLT.Jy17AFq5jdc9ddfTg1D45P_TMHSi2.jGAXBcTMTsehFuydxIMYM_ygmWQ; SC_ANALYTICS_GLOBAL_COOKIE=c536dcafb27d4ffa900210e4622a34c9|True; _gcl_au=1.1.1941525670.1755534219; firstVisit=1755534219327; firstTime=1755534219328; coveo_visitorId=e048b043-9b2a-4bc9-3b51-718762795ccf; cf_clearance=15uQzZxH740MxTMS1TeWKN_DfeqaHbP2g14QfFClZfg-1755534219-1.2.1.1-x6j30zVtZ2JObyjXhoU.lKXibaO41Vm_wu7pIWJb6Y5WY8LFplkaGWST0xxrWvDfGhtfM0sR07.E3AcoN91m.2SEoR3g1HKicwPnmQbvdFr29VDZ46wYk5Mf03jSF7oSU.FhzJOZRxIimZq7O7cMNLXQepL.ZfYAM.XqS5_39gE30Mppv3HOJa_tgAlOIUENGEIsnyVYgzTCCF4htFsn2lxEi9j9WOAAHMS.ETC2_49JPclJm_0TWiluT9FOj3K2; _gid=GA1.2.1658556332.1755534220; _fbp=fb.1.1755534219838.454562934872864213; shell#lang=en; ASP.NET_SessionId=ikmnqfllu5cxx2q5lgcgfbvs; __RequestVerificationToken=9qFGXZGkNwiaI_X-_pH7O0M3Y88Mb-uKekgguO3bvzR--Zdq_jzV8Yttb9BN5Ti1GDO15R1qrq_ToPT0Pm_-PXpqt0w1; _ga_4W67FYNN08=GS2.1.s1755534219$o1$g1$t1755534672$j30$l0$h0; pageCount=5; _ga=GA1.2.1607906110.1755534219; _gali=StoresSearchBox",
+	}
+
+	body := fmt.Sprintf(`actionsHistory=%%5B%%7B%%22name%%22%%3A%%22PageView%%22%%2C%%22value%%22%%3A%%22712668CA41D0461EB27D4D8E1D35FFD0%%22%%2C%%22time%%22%%3A%%222025-08-18T16%%3A31%%3A13.088Z%%22%%7D%%2C%%7B%%22name%%22%%3A%%22PageView%%22%%2C%%22value%%22%%3A%%22110D559FDEA542EA9C1C8A5DF7E70EF9%%22%%2C%%22time%%22%%3A%%222025-08-18T16%%3A30%%3A42.567Z%%22%%7D%%2C%%7B%%22name%%22%%3A%%22PageView%%22%%2C%%22value%%22%%3A%%22712668CA41D0461EB27D4D8E1D35FFD0%%22%%2C%%22time%%22%%3A%%222025-08-18T16%%3A25%%3A23.979Z%%22%%7D%%2C%%7B%%22name%%22%%3A%%22PageView%%22%%2C%%22value%%22%%3A%%22712668CA41D0461EB27D4D8E1D35FFD0%%22%%2C%%22time%%22%%3A%%222025-08-18T16%%3A23%%3A46.786Z%%22%%7D%%2C%%7B%%22name%%22%%3A%%22PageView%%22%%2C%%22value%%22%%3A%%22110D559FDEA542EA9C1C8A5DF7E70EF9%%22%%2C%%22time%%22%%3A%%222025-08-18T16%%3A23%%3A39.401Z%%22%%7D%%5D&referrer=https%%3A%%2F%%2Fwww.abc.virginia.gov%%2F&analytics=%%7B%%22clientId%%22%%3A%%22e048b043-9b2a-4bc9-3b51-718762795ccf%%22%%2C%%22documentLocation%%22%%3A%%22https%%3A%%2F%%2Fwww.abc.virginia.gov%%2Fstores%%23q%%3D%s%%22%%2C%%22documentReferrer%%22%%3A%%22https%%3A%%2F%%2Fwww.abc.virginia.gov%%2F%%22%%2C%%22pageId%%22%%3A%%22110D559FDEA542EA9C1C8A5DF7E70EF9%%22%%2C%%22actionCause%%22%%3A%%22advancedSearch%%22%%2C%%22customData%%22%%3A%%7B%%22JSUIVersion%%22%%3A%%222.10116.0%%3B2.10116.0%%22%%2C%%22pageFullPath%%22%%3A%%22%%2Fsitecore%%2Fcontent%%2FHome%%2FStores%%22%%2C%%22sitename%%22%%3A%%22website%%22%%2C%%22siteName%%22%%3A%%22website%%22%%7D%%2C%%22originContext%%22%%3A%%22WebsiteSearch%%22%%7D&visitorId=e048b043-9b2a-4bc9-3b51-718762795ccf&isGuestUser=false&aq=(%%40z95xtemplate%%3D%%3DA1A81C71EB254BCFB9686611212A840B)%%20(%%24qf(function%%3A'dist(%%40latitude%%2C%%40longitude%%2C%f%%2C%f)'%%2C%%20fieldName%%3A%%20%%40distance))&cq=((%%40z95xlanguage%%3D%%3Den)%%20(%%40z95xlatestversion%%3D%%3D1)%%20(%%40source%%3D%%3D%%22Coveo_web_index%%20-%%20KubProd2%%22))%%20(%%40source%%3D%%3D%%22Coveo_web_index%%20-%%20KubProd2%%22)&searchHub=StoresSearchHub&locale=en&pipeline=Stores&maximumAge=900000&firstResult=0&numberOfResults=10&excerptLength=200&enableDidYouMean=false&sortCriteria=%%40distance%%20ascending&queryFunctions=%%5B%%5D&rankingFunctions=%%5B%%5D&facetOptions=%%7B%%7D&categoryFacets=%%5B%%5D&retrieveFirstSentences=true&timezone=America%%2FNew_York&enableQuerySyntax=false&enableDuplicateFiltering=false&enableCollaborativeRating=false&debug=false&allowQueriesWithoutKeywords=true`, zipcode, lat, lng)
+
+	// Make the API request
+	resp, err := client.R().
+		SetHeaders(headers).
+		SetBody(body).
+		Post(apiURL)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to make API request: %w", err)
+	}
+
+	// Print response for testing
+	fmt.Printf("Status Code: %d\n", resp.StatusCode())
+	fmt.Printf("Response Body: %s\n", resp.String())
+
+	// Check if the request was successful
+	if resp.StatusCode() != 200 {
+		return nil, fmt.Errorf("API request failed with status code: %d, response: %s", resp.StatusCode(), resp.String())
+	}
+
+	// TODO: PARSE THE API RESPONSE HERE
+	// The structure below assumes the API returns an array of store objects
+	// Modify this based on your actual API response structure
+
+	var apiResponse struct {
+		Stores []StoreResult `json:"stores"`
+		// Or if the API returns the stores directly in an array:
+		// Stores []StoreResult `json:"data"`
+	}
+
+	// Alternative: if the API returns stores directly as an array
+	// var stores []StoreResult
+
+	if err := json.Unmarshal(resp.Body(), &apiResponse); err != nil {
+		return nil, fmt.Errorf("failed to parse API response: %w", err)
+	}
+
+	return apiResponse.Stores, nil
 }

@@ -7,6 +7,7 @@ toolchain go1.24.3
 require (
 	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
 	github.com/chromedp/chromedp v0.14.1
+	github.com/go-resty/resty/v2 v2.16.5
 	github.com/gorilla/mux v1.8.1
 	github.com/rs/cors v1.11.1
 )
@@ -17,5 +18,6 @@ require (
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.4.0 // indirect
+	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/sys v0.34.0 // indirect
 )
