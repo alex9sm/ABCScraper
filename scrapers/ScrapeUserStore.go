@@ -34,7 +34,7 @@ func getCoordinatesFromZipcode(zipcode string) (float64, float64, error) {
 	url := fmt.Sprintf("https://nominatim.openstreetmap.org/search?q=%s,USA&format=json&limit=1", zipcode)
 
 	resp, err := client.R().
-		SetHeader("User-Agent", "ABCScraper/1.0").
+		SetHeader("User-Agent", "myGeocoder").
 		Get(url)
 
 	if err != nil {
@@ -42,7 +42,7 @@ func getCoordinatesFromZipcode(zipcode string) (float64, float64, error) {
 	}
 
 	if resp.StatusCode() != 200 {
-		return 0, 0, fmt.Errorf("Nominatim API returned status %d", resp.StatusCode())
+		return 0, 0, fmt.Errorf("nominatim API returned status %d", resp.StatusCode())
 	}
 
 	var results []NominatimResponse
