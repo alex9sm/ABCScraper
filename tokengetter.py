@@ -107,6 +107,15 @@ class TokenExtractor:
                     except:
                         pass
                     
+                    # Extract token from URL or response
+                    token = self._extract_token_from_response(url, response_body)
+                    if token:
+                        self.token_response['token'] = token
+                        # Save token to file
+                        with open('uptodatetoken.txt', 'w') as f:
+                            f.write(token)
+                        print(f"Token saved to uptodatetoken.txt: {token}")
+                    
                     self.token_found = True
                     print("Token response captured!")
                     
@@ -114,6 +123,42 @@ class TokenExtractor:
                     print(f"Error capturing token response: {e}")
         
         page.on('response', handle_response)
+    
+    def _extract_token_from_response(self, url, response_body):
+        """Extract token from URL or response body"""
+        # First try to extract from URL query parameters
+        parsed_url = urlparse(url)
+        query_params = parse_qs(parsed_url.query)
+        
+        # Look for token in query parameters
+        for key, values in query_params.items():
+            if 'token' in key.lower() and values:
+                return values[0]
+        
+        # Try to extract from response body if it's JSON
+        try:
+            json_data = json.loads(response_body)
+            if isinstance(json_data, dict):
+                # Look for common token field names
+                for field in ['token', 'access_token', 'auth_token', 'key']:
+                    if field in json_data:
+                        return str(json_data[field])
+        except:
+            pass
+        
+        # Try to extract token using regex from response body
+        token_patterns = [
+            r'token["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+            r'["\']token["\']\s*:\s*["\']([^"\']+)["\']',
+            r'access_token["\']?\s*[:=]\s*["\']([^"\']+)["\']'
+        ]
+        
+        for pattern in token_patterns:
+            match = re.search(pattern, response_body, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        
+        return None
     
     async def _handle_google_consent(self, page):
         """Handle Google cookie consent popup if present"""
@@ -247,6 +292,8 @@ async def main():
         print("="*50)
         print(f"URL: {token_data['url']}")
         print(f"Status: {token_data['status']}")
+        if 'token' in token_data:
+            print(f"Extracted Token: {token_data['token']}")
         print(f"Response Body: {token_data['body'][:800]}...") 
         
         return token_data
