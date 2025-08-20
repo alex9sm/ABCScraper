@@ -48,18 +48,27 @@ class TokenExtractor:
                 await self._handle_google_consent(page)
                 
                 # Search for the site
+                print("Waiting for search box...")
+                await page.wait_for_selector('//*[@id="APjFqb"]', timeout=10000)
                 print("Searching for 'abc virginia'...")
-                await page.fill('input[name="q"]', 'abc virginia')
-                await page.press('input[name="q"]', 'Enter')
+                await page.fill('//*[@id="APjFqb"]', 'abc virginia')
+                await page.press('//*[@id="APjFqb"]', 'Enter')
                 await page.wait_for_load_state('networkidle')
                 
                 # Step 2: Click on the first relevant result
                 print("Looking for site link in search results...")
-                await self._click_site_result(page)
-                
-                # Step 3: Wait for the site to load and token request to be made
-                print("Waiting for site to load and token request...")
-                await self._wait_for_token_request(page)
+                try:
+                    await self._click_site_result(page)
+                    
+                    # Step 3: Wait for the site to load and token request to be made
+                    print("Waiting for site to load and token request...")
+                    await self._wait_for_token_request(page)
+                except Exception as e:
+                    # If we already found the token during the click attempt, that's fine
+                    if self.token_found:
+                        print(f"Token found despite navigation error: {e}")
+                    else:
+                        raise e
                 
                 if self.token_response:
                     print("Token extracted successfully!")
@@ -177,33 +186,53 @@ class TokenExtractor:
                 try:
                     await page.click('div#search a[href]:not([href*="google.com"]):not([href^="#"])')
                     print("Clicked on first available result")
+                    clicked = True
                 except:
                     raise Exception("Could not find any clickable search results")
             
-            # Wait for navigation
-            await page.wait_for_load_state('networkidle', timeout=30000)
+            # Wait for navigation with shorter timeout, and don't fail if token is already found
+            try:
+                await page.wait_for_load_state('networkidle', timeout=10000)
+            except Exception as e:
+                if not self.token_found:
+                    print(f"Navigation timeout, but continuing: {e}")
+                    # Give it a bit more time for the token request
+                    await page.wait_for_timeout(3000)
             
         except Exception as e:
+            if self.token_found:
+                print(f"Navigation error but token already found: {e}")
+                return
             raise Exception(f"Failed to click site result: {e}")
     
     async def _wait_for_token_request(self, page):
         """Wait for the token request to be made"""
-        # Wait up to 30 seconds for the token request
-        for i in range(60):  # 60 * 0.5 seconds = 30 seconds
+        # If token is already found, no need to wait
+        if self.token_found:
+            return
+            
+        # Wait up to 15 seconds for the token request
+        for i in range(30):  # 30 * 0.5 seconds = 15 seconds
             if self.token_found:
                 break
             await page.wait_for_timeout(500)
             
             # Try to trigger any lazy-loaded content
-            if i == 10:  # After 5 seconds, try scrolling
-                await page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-            elif i == 20:  # After 10 seconds, try refreshing
+            if i == 5:  # After 2.5 seconds, try scrolling
+                try:
+                    await page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+                except:
+                    pass
+            elif i == 15:  # After 7.5 seconds, try refreshing
                 print("Token not found yet, refreshing page...")
-                await page.reload(wait_until='networkidle')
+                try:
+                    await page.reload(wait_until='networkidle', timeout=5000)
+                except:
+                    print("Refresh failed, continuing to wait...")
         
         # Give it a few more seconds after finding the request
         if self.token_found:
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(1000)
 
 async def main():
     """Main function to run the token extraction"""
@@ -218,10 +247,7 @@ async def main():
         print("="*50)
         print(f"URL: {token_data['url']}")
         print(f"Status: {token_data['status']}")
-        print(f"Response Body: {token_data['body'][:500]}...")  # Show first 500 chars
-        
-        if 'json' in token_data:
-            print(f"JSON Response: {json.dumps(token_data['json'], indent=2)}")
+        print(f"Response Body: {token_data['body'][:800]}...") 
         
         return token_data
     else:
