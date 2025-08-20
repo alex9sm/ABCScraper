@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+os.environ['DISPLAY'] = ':1'
 import re
 from playwright.async_api import async_playwright
 from urllib.parse import parse_qs, urlparse
@@ -14,7 +15,6 @@ class TokenExtractor:
         """
         Main method to extract token by searching for the site and monitoring network requests
         """
-        os.environ['DISPLAY'] = ':1'
         
         async with async_playwright() as p:
             # Launch browser with realistic settings to avoid detection
