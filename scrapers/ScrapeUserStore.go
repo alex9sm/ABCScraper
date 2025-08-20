@@ -3,7 +3,9 @@ package scrapers
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -74,6 +76,16 @@ func ScrapeUserStore(zipcode string) ([]StoreResult, error) {
 		return nil, fmt.Errorf("failed to get coordinates for zipcode %s: %w", zipcode, err)
 	}
 
+	// Read Bearer token from file
+	tokenBytes, err := os.ReadFile("uptodatetoken.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read token from uptodatetoken.txt: %w", err)
+	}
+	token := strings.TrimSpace(string(tokenBytes))
+	if token == "" {
+		return nil, fmt.Errorf("token file uptodatetoken.txt is empty")
+	}
+
 	// Create a new resty client
 	client := resty.New()
 
@@ -86,7 +98,7 @@ func ScrapeUserStore(zipcode string) ([]StoreResult, error) {
 		"Host":                       "www.abc.virginia.gov",
 		"Content-Length":             "2229",
 		"Sec-Ch-Ua-Platform":         "\"Windows\"",
-		"Authorization":              "Bearer eyJhbGciOiJIUzI1NiJ9.eyJ2OCI6dHJ1ZSwidG9rZW5JZCI6InJkemtiaWViZ3Ztam9xZDNpeXpsNnRzbTM0Iiwib3JnYW5pemF0aW9uIjoidmlyZ2luaWFhYmNwcm9kdWN0aW9uc2dsNzIwcDEiLCJ1c2VySWRzIjpbeyJ0eXBlIjoiVXNlciIsIm5hbWUiOiJhbm9ueW1vdXMiLCJwcm92aWRlciI6IkVtYWlsIFNlY3VyaXR5IFByb3ZpZGVyIn1dLCJyb2xlcyI6WyJxdWVyeUV4ZWN1dG9yIl0sImlzcyI6IlNlYXJjaEFwaSIsImV4cCI6MTc1NTYxODM3MiwiaWF0IjoxNzU1NTMxOTcyfQ.ypyDp8i3-mVW0Z_4mvdplj2EMJ2ggc2FUGCtIOFJxIg",
+		"Authorization":              "Bearer " + token,
 		"Accept-Language":            "en-US,en;q=0.9",
 		"Sec-Ch-Ua":                  "\"Not A(Brand\";v=\"8\", \"Chromium\";v=\"132\"",
 		"Sec-Ch-Ua-Bitness":          "\"\"",
