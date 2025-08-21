@@ -76,12 +76,19 @@ func ScrapeUserStore(zipcode string) ([]StoreResult, error) {
 		return nil, fmt.Errorf("failed to get coordinates for zipcode %s: %w", zipcode, err)
 	}
 
-	// Read Bearer token from file
+	// Read Bearer token from file (first line only)
 	tokenBytes, err := os.ReadFile("uptodatetoken.txt")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read token from uptodatetoken.txt: %w", err)
 	}
-	token := strings.TrimSpace(string(tokenBytes))
+
+	// Split by newlines and take only the first line (the token)
+	lines := strings.Split(string(tokenBytes), "\n")
+	if len(lines) == 0 {
+		return nil, fmt.Errorf("token file uptodatetoken.txt is empty")
+	}
+
+	token := strings.TrimSpace(lines[0])
 	if token == "" {
 		return nil, fmt.Errorf("token file uptodatetoken.txt is empty")
 	}

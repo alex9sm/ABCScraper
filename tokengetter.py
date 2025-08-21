@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+os.environ['DISPLAY'] = ':1'
 import re
 from datetime import datetime
 from playwright.async_api import async_playwright
@@ -114,19 +115,12 @@ class TokenExtractor:
                     token = self._extract_token_from_response(url, response_body)
                     if token:
                         self.token_response['token'] = token
-                        # Save token to file
+                        # Save token to file with timestamp
+                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         with open('uptodatetoken.txt', 'w') as f:
-                            f.write(token)
-                        
-                        # Rename file with timestamp
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        new_filename = f"uptodatetoken[{timestamp}].txt"
-                        try:
-                            os.rename('uptodatetoken.txt', new_filename)
-                            print(f"Token saved to {new_filename}: {token}")
-                        except Exception as e:
-                            print(f"Token saved to uptodatetoken.txt: {token}")
-                            print(f"Warning: Could not rename file: {e}")
+                            f.write(token + '\n' + timestamp)
+                        print(f"Token saved to uptodatetoken.txt: {token}")
+                        print(f"Timestamp: {timestamp}")
                     
                     self.token_found = True
                     print("Token response captured!")
