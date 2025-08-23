@@ -77,7 +77,7 @@ func ScrapeUserStore(zipcode string) ([]StoreResult, error) {
 	}
 
 	// Read Bearer token from file (first line only)
-	tokenBytes, err := os.ReadFile("uptodatetoken.txt")
+	tokenBytes, err := os.ReadFile("../uptodatetoken.txt")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read token from uptodatetoken.txt: %w", err)
 	}
