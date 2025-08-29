@@ -30,6 +30,9 @@ func SetupRoutes(r *mux.Router) {
 	// Store scraping endpoint - matches your desired format
 	api.HandleFunc("/stores/{zipcode}", scrapeStoresHandler).Methods("GET")
 
+	// Product search endpoint
+	api.HandleFunc("/productsearch/{query}", scrapeProductSearchHandler).Methods("GET")
+
 	// You can add more endpoints here as you expand
 	// api.HandleFunc("/products/{productId}", scrapeProductHandler).Methods("GET")
 	// api.HandleFunc("/categories/{category}", scrapeCategoryHandler).Methods("GET")
@@ -83,10 +86,55 @@ func scrapeStoresHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// Handler for scraping products by search query
+func scrapeProductSearchHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract query from URL path
+	vars := mux.Vars(r)
+	query := vars["query"]
+
+	// Validate query (must not be empty and reasonable length)
+	if !isValidQuery(query) {
+		sendErrorResponse(w, "Invalid query. Must be 1-100 characters and contain valid characters.", http.StatusBadRequest)
+		return
+	}
+
+	// Call your scraper function
+	scrapedData, err := scrapers.ScrapeProductsSearch(query)
+	if err != nil {
+		sendErrorResponse(w, "Failed to scrape product search data: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if scrapedData == nil {
+		scrapedData = []scrapers.ProductResult{}
+	}
+
+	// Send successful response
+	response := APIResponse{
+		Status:    "success",
+		Data:      scrapedData,
+		Timestamp: time.Now(),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
 // Helper function to validate zipcode format
 func isValidZipcode(zipcode string) bool {
 	// Match 5 digits exactly
 	matched, _ := regexp.MatchString(`^\d{5}$`, zipcode)
+	return matched
+}
+
+// Helper function to validate search query
+func isValidQuery(query string) bool {
+	// Must be 1-100 characters, alphanumeric plus common punctuation and spaces
+	if len(query) < 1 || len(query) > 100 {
+		return false
+	}
+	matched, _ := regexp.MatchString(`^[a-zA-Z0-9\s\-'".,&]+$`, query)
 	return matched
 }
 

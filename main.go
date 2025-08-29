@@ -40,6 +40,7 @@ func main() {
 	fmt.Println(" Available endpoints:")
 	fmt.Println("   GET  /health")
 	fmt.Println("   GET  /api/v1/stores/{zipcode}")
+	fmt.Println("   GET  /api/v1/productsearch/{query}")
 
 	log.Fatal(http.ListenAndServe(":"+port, handler))
 }
