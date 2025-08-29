@@ -11,13 +11,13 @@ import (
 )
 
 type ProductResult struct {
-	Title      string `json:"title"`
-	ProductID  int8   `json:"productid"`
-	Sizes      string `json:"sizes"`
-	SizesID    int8   `json:"sizesID"`
-	SizesPrice string `json:"sizesprice"`
-	ABV        int8   `json:"abv"`
-	Image      string `json:"image"`
+	Title      string  `json:"title"`
+	ProductID  string  `json:"productid"`
+	Sizes      string  `json:"sizes"`
+	SizesID    string  `json:"sizesID"`
+	SizesPrice float64 `json:"sizesprice"`
+	ABV        float64 `json:"abv"`
+	Image      string  `json:"image"`
 }
 
 func ScrapeProductsSearch(query string) ([]ProductResult, error) {
@@ -98,13 +98,13 @@ func ScrapeProductsSearch(query string) ([]ProductResult, error) {
 		Results []struct {
 			Title string `json:"title"`
 			Raw   struct {
-				SysTitle   string `json:"systitle"`
-				ProductID  int8   `json:"z95xproductz32xids"`
-				Sizes      string `json:""`
-				SizesID    int8   `json:""`
-				SizesPrice string `json:""`
-				ABV        int8   `json:""`
-				Image      string `json:""`
+				SysTitle      string  `json:"systitle"`
+				ProductID     string  `json:"z95xproductz32xids"`
+				LabelID       int     `json:"productz32xlabelz32xid"`
+				Sizes         string  `json:"z95xproductz32xsiz122xes"`
+				PriceSort     float64 `json:"z95xproductz32xpricez32xsort"`
+				ABV           float64 `json:"abvmaz120x"`
+				Image         string  `json:"z95ximagez32xurl"`
 			} `json:"raw"`
 		} `json:"results"`
 	}
@@ -113,17 +113,23 @@ func ScrapeProductsSearch(query string) ([]ProductResult, error) {
 		return nil, fmt.Errorf("failed to parse API response: %w", err)
 	}
 
-	// Convert API results to StoreResult structs
-	var searchresult []StoreResult
+	// Convert API results to ProductResult structs
+	var searchresult []ProductResult
 	for _, result := range apiResponse.Results {
-		products := StoreResult{
+		// Prepend base URL to image path if it exists and doesn't already have it
+		imageURL := result.Raw.Image
+		if imageURL != "" && !strings.HasPrefix(imageURL, "http") {
+			imageURL = "https://www.abc.virginia.gov" + imageURL
+		}
+		
+		products := ProductResult{
 			Title:      result.Title,
 			ProductID:  result.Raw.ProductID,
 			Sizes:      result.Raw.Sizes,
-			SizesID:    result.Raw.SizesID,
-			SizesPrice: result.Raw.SizesPrice,
+			SizesID:    fmt.Sprintf("%d", result.Raw.LabelID),
+			SizesPrice: result.Raw.PriceSort,
 			ABV:        result.Raw.ABV,
-			Image:      result.Raw.Image,
+			Image:      imageURL,
 		}
 		searchresult = append(searchresult, products)
 	}
